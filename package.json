@@ -1,0 +1,19 @@
+{
+  "name": "hyperspace-app",
+  "version": "0.0.1",
+  "description": "URL-shortner application, which forgets URLs when specified conditions are met (number of clicks, timeout, etc).",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": "",
+  "keywords": [
+    "url",
+    "shortner",
+    "app",
+    "privacy"
+  ],
+  "author": "Alex Indigo <iam@alexindigo.com>",
+  "license": "MIT"
+}
