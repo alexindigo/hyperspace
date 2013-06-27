@@ -15,5 +15,10 @@
     "privacy"
   ],
   "author": "Alex Indigo <iam@alexindigo.com>",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "st": "~0.2.1",
+    "expirable": "0.0.5",
+    "mapleTree": "~0.5.0-1"
+  }
 }
