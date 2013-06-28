@@ -1,5 +1,6 @@
 var http      = require('http')
   , path      = require('path')
+  , qs        = require('querystring')
 
   // thrid-party
   , st        = require('st')
@@ -22,6 +23,7 @@ var http      = require('http')
   , defaults  =
     {
       expire  : 1000 * 60 * 60 * 3, // 3 hours
+      times   : 1, // number of clicks until link dies
     }
   ;
 
@@ -62,43 +64,65 @@ api = new MapleTree.RouteTree();
 // {{{ define api
 // Note: workaround to make it restful
 
-// creates new hash-url pair
-api.define('post/api/url/:url', function(callback)
+// creates new hash for the provided url
+api.define('post/api/hash', function(req, callback)
 {
-  var hash, url;
+  var body = new Buffer('');
 
-  // check for parameters
-  if (!(url = this.params.url)) return callback(new Error('Missing parameter: URL'));
+  // get params
+  req.on('data', function(data)
+  {
+    body = Buffer.concat([body, data]);
 
-  // create new hash
-  hash = getHash();
+    if (body.length > 1024) return callback(new ParamError('Request body too long'));
+  });
 
-  // store pair
-  cache.set(hash, new Buffer(this.params.url));
+  // parse params
+  req.on('end', function()
+  {
+    var hash, params;
 
-  // return hash
-  callback(null, {hash: hash});
+    if (!(params = qs.parse(body.toString('utf8')))) return callback(new ParamError('Cannot parse request parameters'));
+
+    // check for required parameters
+    if (!params.url) return callback(new ParamError('Missing parameter: URL'));
+
+    // check for the rest
+    params.times = +params.times || defaults.times;
+    // TODO: make expire smaller than default
+    params.expire = params.expire || defaults.expire;
+
+    // create new hash
+    hash = createHash();
+
+    // store hash and meta
+    cache.set(hash, new Buffer(params.url), params.expire);
+    cache.set(hash+':meta', {times: params.times, expire: params.expire});
+
+    // auto cleanup
+    cache.on(hash+'::removed', function(expired)
+    {
+      cache.remove(hash+':meta');
+    });
+
+    // return hash
+    callback(null, {hash: hash});
+
+  });
 });
 
 // fetches long url based on hash
-api.define('get/api/url/:hash', function(callback)
+api.define('get/api/hash/:hash', function(req, callback)
 {
-  var url, hash;
-
   // check for parameters
   // TODO: Switch to custom error
-  if (!(hash = this.params.hash)) return callback(new Error('Missing parameter: Hash'));
+  if (!(hash = this.params.hash)) return callback(new ParamError('Missing parameter: Hash'));
 
   // check if hash exists
   if (!cache.has(hash)) return callback(new HashError());
 
-  // get url hash and not prolong expire time
-  url = cache.get(hash, true).toString('utf8');
-
-  // TODO: update counter
-
   // return hash
-  callback(null, {url: url});
+  callback(null, {url: getURL(hash) });
 });
 
 // }}}
@@ -107,6 +131,16 @@ api.define('get/api/url/:hash', function(callback)
 // {{{ start the server
 http.createServer(function(req, res)
 {
+  var hash;
+
+  // check for cached hashes
+  if (cache.has(hash = req.url.substr(1)))
+  {
+    res.writeHead(307, {'Location': getURL(hash) });
+    res.end();
+    return;
+  }
+
   // check for local files first
   files(req, res, function()
   {
@@ -116,7 +150,7 @@ http.createServer(function(req, res)
     if ((match = api.match(req.method+req.url)).perfect)
     {
       // execute matched method and be done here
-      return match.fn(function(err, data)
+      return match.fn(req, function(err, data)
       {
         var statusCode = 200
           , result = {}
@@ -125,16 +159,11 @@ http.createServer(function(req, res)
         if (err)
         {
           statusCode = err.code || 400;
-
-          // wrap up result object
-          result.status = 'not';
-          result.error = err;
+          result = err;
         }
         else
         {
-          // wrap up result object
-          result.status = 'ok';
-          result.data = data;
+          result = data;
         }
 
         res.writeHead(statusCode, {'Content-type': 'application/json'});
@@ -143,7 +172,7 @@ http.createServer(function(req, res)
     }
 
     res.writeHead(404, {'Content-type': 'text/plain'});
-    return res.end('END: '+getHash()+' : '+getHash()+'\n');
+    return res.end('Not Found');
   });
 
 }).listen(config.port, config.host);
@@ -162,10 +191,45 @@ function HashError(message)
 HashError.prototype = new Error();
 HashError.prototype.constructor = HashError;
 
+// HashError, happens when request hash doesn't exist
+function ParamError(message)
+{
+  this.code = 400; // http code related to the error
+  this.name = 'ParamError';
+  this.message = message || 'Invalid parameters';
+}
+ParamError.prototype = new Error();
+ParamError.prototype.constructor = ParamError;
+
+
 // --- Santa's little helpers
 
+// fetches URL by provided hash from the cache, updating meta data
+function getURL(hash)
+{
+  var meta, url;
+
+  // get url meta
+  meta = cache.get(hash+':meta');
+console.log(['meta', meta]);
+  // get url hash and not prolong expire time
+  url = cache.get(hash, true).toString('utf8');
+
+  // update counter and when it's done clean up
+  if (!--meta.times)
+  {
+    cache.remove(hash);
+  }
+  else
+  {
+    cache.set(hash+':meta', meta);
+  }
+
+  return url;
+}
+
 // returns unique hash of variable length
-function getHash()
+function createHash()
 {
   var time = process.hrtime() // get unique number
     , salt = Math.floor(Math.random() * Math.pow(10, Math.random()*10)) // get variable length prefix
