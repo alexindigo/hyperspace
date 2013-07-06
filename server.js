@@ -24,6 +24,7 @@ var http      = require('http')
     {
       expire  : 1000 * 60 * 60 * 3, // 3 hours
       times   : 1, // number of clicks until link dies
+      fallback: 'http://www.youtube.com/watch?v=IAISUDbjXj0', // rickroll 'em
     }
   ;
 
@@ -173,6 +174,10 @@ http.createServer(function(req, res)
 
     res.writeHead(404, {'Content-type': 'text/plain'});
     return res.end('Not Found');
+
+    // rickroll 'em
+    // res.writeHead(307, {'Location': defaults.fallback});
+    // return res.end();
   });
 
 }).listen(config.port, config.host);
@@ -216,7 +221,7 @@ console.log(['meta', meta]);
   url = cache.get(hash, true).toString('utf8');
 
   // update counter and when it's done clean up
-  if (!--meta.times)
+  if (!meta || !meta.times || !--meta.times)
   {
     cache.remove(hash);
   }
